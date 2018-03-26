@@ -91,11 +91,12 @@ class Parser:
         while s:
             self.parseline(s)
             s = f.readline()
-        return self.state.root
+        return self.end_of_input()
 
     def loads(self, s):
         ## Assume only one line
-        return self.parseline(s)
+        self.parseline(s)
+        return self.end_of_input()
 
     def skip(self, c):
         return True
@@ -172,8 +173,8 @@ class Parser:
     def acc_escape(self, c):
         ## Only single char escapes supported for now
         st = self.state
-        ch = 'btvnfr"\''
-        ech = [ '\b', '\t', '\v', '\n', '\f', '\r', '"', "'" ]
+        ch = 'btvnfr"\'\r\n'
+        ech = [ '\b', '\t', '\v', '\n', '\f', '\r', '"', "'", '', '' ]
         try:
             i = ch.index(c)
             st.string += ech[i]
@@ -207,7 +208,7 @@ class Parser:
         ## ParserState.EXPRESSION
         [ skip,      start_num,   start_token,   expr, start_quote, syn_error, reserved,    syn_error ],
         ## ParserState.TOKEN
-        [ end_token, syn_error,       acc,     expr, end_quote, syn_error, end_token,    syn_error ],
+        [ end_token, syn_error,       acc,     end_token, end_quote, syn_error, end_token,    syn_error ],
         ## ParserState.QUOTED_STRING
         [ acc, acc,         acc,     acc, end_quote, escape, reserved,    acc ],
         ## ParserState.HEX_STRING
@@ -236,43 +237,11 @@ class Parser:
                 st.colno += 1
             #else: recirculate char
 
-#            if s[i] in Parser.alphabetic:
-#                if not st.atom:
-#                    ## Token starting
-#                    st.atom = ParserState.TOKEN
-#                    st.string = s[i]
-#                else:
-#                    ## Token continuing
-#                    st.token += s[i]
-#            else:
-#                if st.token:
-#                    ## Token finishing
-#                    a = Atom(st.token, depth=st.depth)
-#                    st.token = None
-#                    if st.expr:
-#                        st.expr.cons(a)
-#                    else:
-#                        raise SyntaxError('Line: %d Col: %d' % (st.lineno, i))
-#                if s[i] in Parser.whitespace:
-#                    pass
-#                elif s[i] in Parser.reserved:
-#                    if s[i] == '(':
-#                        if not st.root:
-#                            st.root = Expression(parent=st.expr)
-#                            st.expr = st.root
-#                        else:
-#                            st.depth += 1
-#                            st.expr = Expression(parent=st.expr, depth=st.depth)
-#                    elif s[i] == ')':
-#                        if st.expr.parent:
-#                            st.expr.parent.cons(st.expr)
-#                            st.depth -= 1
-#                        st.expr = st.expr.parent
-#                    else:
-        if st.depth != 0:
+    def end_of_input(self):
+        if self.state.depth != 0:
             self.error('Missing closing parenthesis')
         
-        return st.root
+        return self.state.root
 
 if __name__ == '__main__':
     p = Parser()
