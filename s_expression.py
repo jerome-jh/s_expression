@@ -80,27 +80,57 @@ class ParserState:
         self.depth = 0
 
 class Parser:
-    ## Characters classes should be disjunct
-    whitespace = [ '%c'%c for c in it.chain(range(9, 14), [32]) ]
-    numeric = [ '%c'%c for c in range(48, 58) ]
-    pseudo_alphabetic = [ '-', '.', '/', '_', ':', '*', '+', '=' ]
-    alphabetic = [ '%c'%c for c in it.chain(range(65, 91), range(97, 123)) ] + pseudo_alphabetic
-    expr = [ '(', ')' ]
-    quote = [ '"' ]
-    escape = [ '\\' ]
-    reserved = [ '[', ']', '{', '}', '|', '#', '&' ]
-    verbatim = [ '!', '%', '^', '~', ';', "'", ',', '<', '>', '?' ]
 
-    char_class = [ whitespace, numeric, alphabetic, expr, quote, escape, reserved, verbatim ]
+    def whitespace(self, c):
+        cp = ord(c)
+        return (cp >= 9 and cp < 14) or cp == 32
+
+    def numeric(self, c):
+        cp = ord(c)
+        return cp >= 48 and cp < 58
+
+    def pseudo_alphabetic(self, c):
+        return c in [ '-', '.', '/', '_', ':', '*', '+', '=' ]
+
+    def alphabetic(self, c):
+        cp = ord(c)
+        return (cp >= 65 and cp < 91) or (cp >= 97 and cp < 123) or self.pseudo_alphabetic(c)
+
+    def expr(self, c):
+        return c in [ '(', ')' ]
+
+    def quote(self, c):
+        return c == '"'
+
+    def escape(self, c):
+        return c == '\\'
+
+    def reserved(self, c):
+        return c in [ '[', ']', '{', '}', '|', '#', '&' ]
+
+    def verbatim(self, c):
+        return c in [ '!', '%', '^', '~', ';', "'", ',', '<', '>', '?' ]
+
+    def utf8(self, c):
+        return ord(c) >= 128
+
+    ## Characters classes should be disjunct
+    char_class = [ whitespace, numeric, alphabetic, expr, quote, escape, reserved, verbatim, utf8 ]
 
     def __init__(self):
         self.state = ParserState()
 
-    def loadf(self, f):
-        s = f.readline()
-        while s:
-            self.parseline(s)
+    def loadf(self, filename):
+        f = open(filename, 'r', encoding='utf-8')
+        try:
             s = f.readline()
+            while s:
+                self.parseline(s)
+                s = f.readline()
+        except Exception as e:
+            f.close()
+            raise e
+        f.close()
         return self.end_of_input()
 
     def loads(self, s):
@@ -115,7 +145,7 @@ class Parser:
         if type(msg) != type(None):
             raise SyntaxError('Syntax Error: %s\nLine: %d Col: %d' % (msg, self.state.lineno, self.state.colno + 1))
         else:
-            raise SyntaxError('Syntax Error\nLine: %d Col: %d' % (self.state.lineno, self.state.colno + 1))
+            raise SyntaxError('Syntax Error\nLine: %d Col: %d Char: %c' % (self.state.lineno, self.state.colno + 1, c))
 
     def error(self, msg):
         raise Exception('%s\nLine: %d Col: %d' % (msg, self.state.lineno, self.state.colno + 1))
@@ -215,19 +245,17 @@ class Parser:
         return True
 
     transition = [
-        ## ParserState.ROOT
-        ## Whitespace,numeric,    alphabetic, expr, quote, reserved,  verbatim
-#        [ skip,      syn_error,       syn_error,   reserved,    syn_error ],
         ## ParserState.EXPRESSION
-        [ skip,      start_num,   start_token,   expr, start_quote, syn_error, reserved,    syn_error ],
+        ## Whitespace,numeric,    alphabetic, expr, quote, reserved,  verbatim, utf8
+        [ skip,      start_num,   start_token,   expr, start_quote, syn_error, reserved,    syn_error, syn_error ],
         ## ParserState.TOKEN
-        [ end_token, syn_error,       acc,     end_token, end_quote, syn_error, end_token,    syn_error ],
+        [ end_token, syn_error,       acc,     end_token, end_quote, syn_error, end_token,    syn_error, syn_error ],
         ## ParserState.QUOTED_STRING
-        [ acc, acc,         acc,     acc, end_quote, escape, reserved,    acc ],
+        [ acc, acc,         acc,     acc, end_quote, escape, reserved,    acc, acc ],
         ## ParserState.HEX_STRING
-        [ end_hex,   syn_error,       syn_error,   syn_error, syn_error, syn_error, reserved,    syn_error ],
+        [ end_hex,   syn_error,       syn_error,   syn_error, syn_error, syn_error, reserved,    syn_error, syn_error ],
         ## ParserState.ESCAPE
-        [ acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape ],
+        [ acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, syn_error ],
     ]
 
     def parseline(self, s):
@@ -240,12 +268,13 @@ class Parser:
             assert((st.state >= ParserState.TOKEN and st.string != None) or not (st.state >= ParserState.TOKEN or st.string != None))
             r = None
             for j, cc in enumerate(Parser.char_class):
-                if s[st.colno] in cc:
-                    debug(st.state, j, s[st.colno], self.transition[st.state][j])
-                    r = self.transition[st.state][j](self, s[st.colno])
+                c = s[st.colno]
+                if cc(self, c):
+                    debug(st.state, c, cc.__name__, self.transition[st.state][j].__name__)
+                    r = self.transition[st.state][j](self, c)
                     break
             if r == None:
-                self.error('Program bug: character classes wrongly defined')
+                self.error('Program bug: \'%c\' has no character class'%c)
             if r:
                 st.colno += 1
             #else: recirculate char
@@ -258,7 +287,7 @@ class Parser:
 
 if __name__ == '__main__':
     p = Parser()
-    r = p.loadf(open(sys.argv[1], 'r'))
+    r = p.loadf(sys.argv[1])
     print(r.dump())
     print(str(r))
 

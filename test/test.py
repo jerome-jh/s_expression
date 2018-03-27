@@ -20,13 +20,11 @@ class TestSexpression(unittest.TestCase):
                 threw = False
                 r = None
                 print(filename)
-                f = open(filename, 'r')
                 try:
-                    r = s_expression.Parser().loadf(f)
+                    r = s_expression.Parser().loadf(filename)
                 except Exception as e:
                     print('Threw', type(e), e)
                     threw = True
-                f.close()
                 self.assertTrue(type(r) != type(None) and not threw)
 
     def test_parse_failure(self):
@@ -36,13 +34,11 @@ class TestSexpression(unittest.TestCase):
                 threw = False
                 r = None
                 print(filename)
-                f = open(filename, 'r')
                 try:
-                    r = s_expression.Parser().loadf(f)
+                    r = s_expression.Parser().loadf(filename)
                 except Exception as e:
                     print('Threw', type(e), e)
                     threw = True
-                f.close()
                 ## TODO: should check exception type
                 self.assertTrue(type(r) == type(None) and threw)
 
