@@ -69,15 +69,15 @@ class Expression:
         return s
 
 class ParserState:
-    EXPRESSION = 0
-    TOKEN = 1
-    QUOTED_STRING = 2
-    HEX_STRING = 3
-    ESCAPE = 4
+    ## First state in list is start state
+    state_name = [ 'EXPRESSION', 'TOKEN', 'QUOTED_STRING', 'HEX_STRING', 'ESCAPE', 'NUMBER' ]
 
     def __init__(self):
+        ## Define parser states
+        for i, s in enumerate(ParserState.state_name):
+            setattr(ParserState, s, i)
         ## Current parser state
-        self.state = ParserState.EXPRESSION
+        self.state = 0
         ## Accumulator string when parsing an atom
         self.string = None
         ## Current expression
@@ -91,6 +91,12 @@ class ParserState:
         ## Current depth: useless during parsing
         ## It is used in the __str__ methods. May have other uses.
         self.depth = 0
+
+    def number():
+        return len(ParserState.state_name)
+
+    def name(self):
+        return ParserState.state_name[self.state]
 
 class Parser:
 
@@ -109,7 +115,7 @@ class Parser:
         cp = ord(c)
         return (cp >= 65 and cp < 91) or (cp >= 97 and cp < 123) or self.pseudo_alphabetic(c)
 
-    def expr(self, c):
+    def expr_delim(self, c):
         return c in [ '(', ')' ]
 
     def quote(self, c):
@@ -128,7 +134,7 @@ class Parser:
         return ord(c) >= 128
 
     ## Characters classes should be disjunct
-    char_class = [ whitespace, numeric, alphabetic, expr, quote, escape, reserved, verbatim, utf8 ]
+    char_class = [ whitespace, numeric, alphabetic, expr_delim, quote, escape, reserved, verbatim, utf8 ]
 
     def __init__(self):
         self.state = ParserState()
@@ -258,8 +264,8 @@ class Parser:
         return True
 
     transition = [
+        ## Whitespace,numeric,    alphabetic, expr_delim, quote, reserved,  verbatim, utf8
         ## ParserState.EXPRESSION
-        ## Whitespace,numeric,    alphabetic, expr, quote, reserved,  verbatim, utf8
         [ skip,      start_num,   start_token,   expr, start_quote, syn_error, reserved,    syn_error, syn_error ],
         ## ParserState.TOKEN
         [ end_token, syn_error,       acc,     end_token, end_quote, syn_error, end_token,    syn_error, syn_error ],
@@ -283,7 +289,7 @@ class Parser:
             for j, cc in enumerate(Parser.char_class):
                 c = s[st.colno]
                 if cc(self, c):
-                    debug(st.state, c, cc.__name__, self.transition[st.state][j].__name__)
+                    debug(st.name(), c, cc.__name__, self.transition[st.state][j].__name__)
                     r = self.transition[st.state][j](self, c)
                     break
             if r == None:
@@ -299,7 +305,7 @@ class Parser:
         return self.state.root
 
 if __name__ == '__main__':
-    r = p.Parser().loadf(sys.argv[1])
+    r = Parser().loadf(sys.argv[1])
     print(r.dump())
     print(str(r))
 
