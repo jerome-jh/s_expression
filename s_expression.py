@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 import sys
-import itertools as it
 
 if __name__ == '__main__':
     def debug(*args):
@@ -18,6 +17,13 @@ class Atom:
         if type(initial_depth) == type(None):
             initial_depth = self.depth
         return Expression.depth_str(self.depth - initial_depth) + type(self).__name__ + ': ' + str(self) + '\n'
+
+    def value(self):
+        """ The value of the atom can be any type """
+        return self.token
+
+    def to_list(self):
+        return self.value()
 
     def __str__(self):
         return self.token
@@ -38,13 +44,20 @@ class Expression:
         return s
 
     def dump(self, initial_depth=None):
-        """ Print tree below that point """
+        """ Print a sub-tree below that point """
         if type(initial_depth) == type(None):
             initial_depth = self.depth
         s = Expression.depth_str(self.depth - initial_depth) + type(self).__name__ + ':\n'
         for e in self.child:
             s += e.dump(initial_depth)
         return s
+
+    def to_list(self):
+        """ Return a list of list of the sub-tree rooted at self """
+        r = list()
+        for e in self.child:
+            r.append(e.to_list())
+        return r
 
     def __str__(self):
         s = '('
@@ -286,8 +299,7 @@ class Parser:
         return self.state.root
 
 if __name__ == '__main__':
-    p = Parser()
-    r = p.loadf(sys.argv[1])
+    r = p.Parser().loadf(sys.argv[1])
     print(r.dump())
     print(str(r))
 
