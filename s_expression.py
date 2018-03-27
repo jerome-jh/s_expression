@@ -73,9 +73,6 @@ class ParserState:
     state_name = [ 'EXPRESSION', 'TOKEN', 'QUOTED_STRING', 'HEX_STRING', 'ESCAPE', 'NUMBER' ]
 
     def __init__(self):
-        ## Define parser states
-        for i, s in enumerate(ParserState.state_name):
-            setattr(ParserState, s, i)
         ## Current parser state
         self.state = 0
         ## Accumulator string when parsing an atom
@@ -98,15 +95,19 @@ class ParserState:
     def name(self):
         return ParserState.state_name[self.state]
 
+## Define parser states
+for i, s in enumerate(ParserState.state_name):
+    setattr(ParserState, s, i)
+
 class Parser:
 
     def whitespace(self, c):
         cp = ord(c)
         return (cp >= 9 and cp < 14) or cp == 32
 
-    def numeric(self, c):
+    def control(self, c):
         cp = ord(c)
-        return cp >= 48 and cp < 58
+        return (cp >= 0 and cp <= 31) or cp == 127
 
     def pseudo_alphabetic(self, c):
         return c in [ '-', '.', '/', '_', ':', '*', '+', '=' ]
@@ -133,8 +134,21 @@ class Parser:
     def utf8(self, c):
         return ord(c) >= 128
 
+    def digit(self, c):
+        cp = ord(c)
+        return cp >= ord('0') and cp <= ord('9')
+
+    def digit_nz(self, c):
+        cp = ord(c)
+        return cp >= ord('1') and cp <= ord('9')
+
+    def zero(self, c):
+        return c == '0'
+
+    def any_char(self, c):
+        return True
+
     ## Characters classes should be disjunct
-    char_class = [ whitespace, numeric, alphabetic, expr_delim, quote, escape, reserved, verbatim, utf8 ]
 
     def __init__(self):
         self.state = ParserState()
@@ -216,10 +230,29 @@ class Parser:
         st.state = ParserState.EXPRESSION
         return False
 
+    def end_number(self, c):
+        st = self.state
+        i = int(st.string)
+        ##TODO subclass Atom
+        a = Atom(st.string, depth=st.depth)
+        st.string = None
+        if st.expr:
+            st.expr.cons(a)
+        else:
+            assert(st.depth == 0)
+            if st.root:
+                self.error('Root must be a token or a list')
+            st.root = a
+        st.state = ParserState.EXPRESSION
+        return False
+
     def end_hex(self, c):
         return True
 
     def start_num(self, c):
+        st = self.state
+        st.string = c
+        st.state = ParserState.NUMBER
         return True
 
     def start_quote(self, c):
@@ -228,7 +261,7 @@ class Parser:
         st.state = ParserState.QUOTED_STRING
         return True
 
-    def escape(self, c):
+    def start_escape(self, c):
         self.state.state = ParserState.ESCAPE
         return True
 
@@ -263,19 +296,17 @@ class Parser:
         self.state.string += c
         return True
 
-    transition = [
-        ## Whitespace,numeric,    alphabetic, expr_delim, quote, reserved,  verbatim, utf8
-        ## ParserState.EXPRESSION
-        [ skip,      start_num,   start_token,   expr, start_quote, syn_error, reserved,    syn_error, syn_error ],
-        ## ParserState.TOKEN
-        [ end_token, syn_error,       acc,     end_token, end_quote, syn_error, end_token,    syn_error, syn_error ],
-        ## ParserState.QUOTED_STRING
-        [ acc, acc,         acc,     acc, end_quote, escape, reserved,    acc, acc ],
-        ## ParserState.HEX_STRING
-        [ end_hex,   syn_error,       syn_error,   syn_error, syn_error, syn_error, reserved,    syn_error, syn_error ],
-        ## ParserState.ESCAPE
-        [ acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, acc_escape, syn_error ],
-    ]
+    transition = [ 0 ] * ParserState.number()
+    transition[ParserState.EXPRESSION] = [[ whitespace, skip ], [ digit_nz, start_num ],
+            [ zero, start_num ], #TODO: should be start octal
+            [ alphabetic, start_token ], [ expr_delim, expr ], [ quote, start_quote ], [ any_char, syn_error ]]
+    transition[ParserState.TOKEN] = [[ whitespace, end_token ], [ alphabetic, acc ], [ expr_delim, end_token ],
+            [ any_char, syn_error]]
+    transition[ParserState.QUOTED_STRING] = [[ escape, start_escape ], [ control, syn_error ], [ quote, end_quote ],
+            [ any_char, acc ]]
+    transition[ParserState.ESCAPE] = [[ any_char, acc_escape ]]
+    transition[ParserState.NUMBER] = [[ whitespace, end_number], [digit, acc], [expr_delim, end_number],
+            [any_char, syn_error]]
 
     def parseline(self, s):
         st = self.state
@@ -286,11 +317,11 @@ class Parser:
             ## atom and string are both != None or both == None
             assert((st.state >= ParserState.TOKEN and st.string != None) or not (st.state >= ParserState.TOKEN or st.string != None))
             r = None
-            for j, cc in enumerate(Parser.char_class):
-                c = s[st.colno]
-                if cc(self, c):
-                    debug(st.name(), c, cc.__name__, self.transition[st.state][j].__name__)
-                    r = self.transition[st.state][j](self, c)
+            c = s[st.colno]
+            for t in self.transition[st.state]:
+                if t[0](self, c):
+                    debug(st.name(), c, t[0].__name__, t[1].__name__)
+                    r = t[1](self, c)
                     break
             if r == None:
                 self.error('Program bug: \'%c\' has no character class'%c)
