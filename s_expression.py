@@ -14,9 +14,13 @@ class Atom:
         self.token = token
         self.depth = depth
 
+    def dump(self, initial_depth=None):
+        if type(initial_depth) == type(None):
+            initial_depth = self.depth
+        return Expression.depth_str(self.depth - initial_depth) + type(self).__name__ + ': ' + str(self) + '\n'
+
     def __str__(self):
-        s = Expression.depth_str(self.depth)
-        return s + 'Token: ' + self.token + '\n'
+        return self.token
 
 class Expression:
     def __init__(self, parent=None, depth=0):
@@ -33,16 +37,22 @@ class Expression:
             s += ' '
         return s
 
-    def __str__(self):
-        s = Expression.depth_str(self.depth)
-        s += 'Expr:\n'
+    def dump(self, initial_depth=None):
+        """ Print tree below that point """
+        if type(initial_depth) == type(None):
+            initial_depth = self.depth
+        s = Expression.depth_str(self.depth - initial_depth) + type(self).__name__ + ':\n'
         for e in self.child:
-            if type(e) == type(Expression()):
-                s += str(e)
-            elif type(e) == type(Atom('a')):
-                s += str(e)
-            else:
-                raise BaseException(str(type(e)))
+            s += e.dump(initial_depth)
+        return s
+
+    def __str__(self):
+        s = '('
+        delim = ''
+        for e in self.child:
+            s += delim + str(e)
+            delim = ' '
+        s += ')'
         return s
 
 class ParserState:
@@ -101,11 +111,14 @@ class Parser:
     def skip(self, c):
         return True
 
-    def syn_error(self, c=''):
-        raise SyntaxError('Syntax Error\nLine: %d Col: %d' % (self.state.lineno, self.state.colno + 1))
+    def syn_error(self, c='', msg=None):
+        if type(msg) != type(None):
+            raise SyntaxError('Syntax Error: %s\nLine: %d Col: %d' % (msg, self.state.lineno, self.state.colno + 1))
+        else:
+            raise SyntaxError('Syntax Error\nLine: %d Col: %d' % (self.state.lineno, self.state.colno + 1))
 
     def error(self, msg):
-        raise BaseException('%s\nLine: %d Col: %d' % (msg, self.state.lineno, self.state.colno + 1))
+        raise Exception('%s\nLine: %d Col: %d' % (msg, self.state.lineno, self.state.colno + 1))
 
     def reserved(self, c):
         return True
@@ -239,11 +252,13 @@ class Parser:
 
     def end_of_input(self):
         if self.state.depth != 0:
-            self.error('Missing closing parenthesis')
+            self.syn_error('', 'Missing closing parenthesis')
         
         return self.state.root
 
 if __name__ == '__main__':
     p = Parser()
-    print(p.loadf(open(sys.argv[1], 'r')))
+    r = p.loadf(open(sys.argv[1], 'r'))
+    print(r.dump())
+    print(str(r))
 
