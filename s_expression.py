@@ -10,7 +10,11 @@ else:
 
 class Atom:
     def __init__(self, token, depth=0):
+        ## Token is the original string as it was parsed
         self.token = token
+        ## Value is the interpretation of the token
+        ## It can be any Python basic type
+        self.value = token
         self.depth = depth
 
     def dump(self, initial_depth=None):
@@ -19,14 +23,36 @@ class Atom:
         return Expression.depth_str(self.depth - initial_depth) + type(self).__name__ + ': ' + str(self) + '\n'
 
     def value(self):
-        """ The value of the atom can be any type """
-        return self.token
+        return self.value
 
     def to_list(self):
-        return self.value()
+        return self.value
 
     def __str__(self):
         return self.token
+
+class QuotedString(Atom):
+    def __str__(self):
+        return '"' + self.token + '"'
+
+class NumberDecimal(Atom):
+    def __init__(self, token, depth=0):
+        super().__init__(token, depth)
+        if token[0:2] == '0d':
+            self.value = int(token[2:])
+        else:
+            self.value = int(token)
+
+class NumberBinary(Atom):
+    def __init__(self, token, depth=0):
+        super().__init__(token, depth)
+        self.value = eval(token)
+
+class NumberOctal(NumberBinary):
+    pass
+
+class NumberHexadecimal(NumberBinary):
+    pass
 
 class Expression:
     def __init__(self, parent=None, depth=0):
@@ -70,7 +96,7 @@ class Expression:
 
 class ParserState:
     ## First state in list is start state
-    state_name = [ 'EXPRESSION', 'TOKEN', 'QUOTED_STRING', 'HEX_STRING', 'ESCAPE', 'NUMBER' ]
+    state_name = [ 'EXPRESSION', 'TOKEN', 'QUOTED_STRING', 'HEX_STRING', 'ESCAPE', 'NUMBER', 'LEAD_ZERO', 'NUMBER_BIN', 'NUMBER_OCT', 'NUMBER_HEX', 'NUMBER_BIN_C1', 'NUMBER_OCT_C1', 'NUMBER_DEC_C1', 'NUMBER_HEX_C1' ]
 
     def __init__(self):
         ## Current parser state
@@ -99,59 +125,73 @@ class ParserState:
 for i, s in enumerate(ParserState.state_name):
     setattr(ParserState, s, i)
 
-class Parser:
-
-    def whitespace(self, c):
+class Character:
+    """ Character classes """
+    def whitespace(c):
         cp = ord(c)
         return (cp >= 9 and cp < 14) or cp == 32
 
-    def control(self, c):
+    def control(c):
         cp = ord(c)
         return (cp >= 0 and cp <= 31) or cp == 127
 
-    def pseudo_alphabetic(self, c):
+    def pseudo_alphabetic(c):
         return c in [ '-', '.', '/', '_', ':', '*', '+', '=' ]
 
-    def alphabetic(self, c):
+    def alphabetic(c):
         cp = ord(c)
-        return (cp >= 65 and cp < 91) or (cp >= 97 and cp < 123) or self.pseudo_alphabetic(c)
+        return (cp >= 65 and cp < 91) or (cp >= 97 and cp < 123) or Character.pseudo_alphabetic(c)
 
-    def expr_delim(self, c):
+    def expr(c):
         return c in [ '(', ')' ]
 
-    def quote(self, c):
+    def quote(c):
         return c == '"'
 
-    def escape(self, c):
+    def escape(c):
         return c == '\\'
 
-    def reserved(self, c):
+    def reserved(c):
         return c in [ '[', ']', '{', '}', '|', '#', '&' ]
 
-    def verbatim(self, c):
+    def verbatim(c):
         return c in [ '!', '%', '^', '~', ';', "'", ',', '<', '>', '?' ]
 
-    def utf8(self, c):
+    def utf8(c):
         return ord(c) >= 128
 
-    def digit(self, c):
+    def digit(c):
         cp = ord(c)
         return cp >= ord('0') and cp <= ord('9')
 
-    def digit_nz(self, c):
+    def digit_bin(c):
+        return c in [ '0', '1' ]
+
+    def digit_oct(c):
+        cp = ord(c)
+        return cp >= ord('0') and cp <= ord('7')
+
+    def digit_hex(c):
+        cp = ord(c)
+        return Character.digit(c) or (cp >= ord('a') and cp <= ord('f')) or (cp >= ord('A') and cp <= ord('F'))
+
+    def digit_nz(c):
         cp = ord(c)
         return cp >= ord('1') and cp <= ord('9')
 
-    def zero(self, c):
+    def zero(c):
         return c == '0'
 
-    def any_char(self, c):
+    def radix(c):
+        return c in [ 'b', 'o', 'd', 'x' ]
+
+    def any(c):
         return True
 
-    ## Characters classes should be disjunct
-
+class Parser:
     def __init__(self):
         self.state = ParserState()
+        self.cc = Character ## Reference to class
 
     def loadf(self, filename):
         f = open(filename, 'r', encoding='utf-8')
@@ -176,7 +216,7 @@ class Parser:
 
     def syn_error(self, c='', msg=None):
         if type(msg) != type(None):
-            raise SyntaxError('Syntax Error: %s\nLine: %d Col: %d' % (msg, self.state.lineno, self.state.colno + 1))
+            raise SyntaxError('Syntax Error: %s\nLine: %d Col: %d Char: %c' % (msg, self.state.lineno, self.state.colno + 1, c))
         else:
             raise SyntaxError('Syntax Error\nLine: %d Col: %d Char: %c' % (self.state.lineno, self.state.colno + 1, c))
 
@@ -197,6 +237,8 @@ class Parser:
             st.depth += 1
         elif c == ')':
             ## Expression end
+            if st.depth == 0:
+                self.syn_error(c, 'Closing parenthesis too many')
             st.depth -= 1
             if st.expr.parent:
                 st.expr.parent.cons(st.expr)
@@ -232,9 +274,18 @@ class Parser:
 
     def end_number(self, c):
         st = self.state
-        i = int(st.string)
-        ##TODO subclass Atom
-        a = Atom(st.string, depth=st.depth)
+        if st.state == ParserState.NUMBER or st.state == ParserState.LEAD_ZERO:
+            ## decimal number or lone zero
+            a = NumberDecimal(st.string, depth=st.depth)
+        else:
+            if st.state == ParserState.NUMBER_BIN:
+                a = NumberBinary(st.string, depth=st.depth)
+            elif st.state == ParserState.NUMBER_OCT:
+                a = NumberOctal(st.string, depth=st.depth)
+            elif st.state == ParserState.NUMBER_HEX:
+                a = NumberHexadecimal(st.string, depth=st.depth)
+            else:
+                self.error('Program bug!')
         st.string = None
         if st.expr:
             st.expr.cons(a)
@@ -253,6 +304,33 @@ class Parser:
         st = self.state
         st.string = c
         st.state = ParserState.NUMBER
+        return True
+
+    def lead_zero(self, c):
+        st = self.state
+        st.string = c
+        st.state = ParserState.LEAD_ZERO
+        return True
+
+    def cont_num(self, c):
+        st = self.state
+        st.string += c
+        st.state = ParserState.NUMBER
+        return True
+
+    def radix(self, c):
+        st = self.state
+        if c == 'b':
+            st.state = ParserState.NUMBER_BIN_C1
+        elif c == 'o':
+            st.state = ParserState.NUMBER_OCT_C1
+        elif c == 'd':
+            st.state = ParserState.NUMBER_DEC_C1
+        elif c == 'x':
+            st.state = ParserState.NUMBER_HEX_C1
+        else:
+            self.error('Program bug: discrepency with radix \'%c\''%c)
+        st.string += c
         return True
 
     def start_quote(self, c):
@@ -280,7 +358,7 @@ class Parser:
 
     def end_quote(self, c):
         st = self.state
-        a = Atom(st.string, depth=st.depth)
+        a = QuotedString(st.string, depth=st.depth)
         st.string = None
         if st.expr:
             st.expr.cons(a)
@@ -292,21 +370,51 @@ class Parser:
         st.state = ParserState.EXPRESSION
         return True
 
+    def acc_c1(self, c):
+        st = self.state
+        if st.state == ParserState.NUMBER_BIN_C1:
+            st.state = ParserState.NUMBER_BIN
+        elif st.state == ParserState.NUMBER_OCT_C1:
+            st.state = ParserState.NUMBER_OCT
+        elif st.state == ParserState.NUMBER_DEC_C1:
+            st.state = ParserState.NUMBER
+        elif st.state == ParserState.NUMBER_HEX_C1:
+            st.state = ParserState.NUMBER_HEX
+        else:
+            self.error('Program bug!')
+        self.state.string += c
+        return True
+
     def acc(self, c):
         self.state.string += c
         return True
 
     transition = [ 0 ] * ParserState.number()
-    transition[ParserState.EXPRESSION] = [[ whitespace, skip ], [ digit_nz, start_num ],
-            [ zero, start_num ], #TODO: should be start octal
-            [ alphabetic, start_token ], [ expr_delim, expr ], [ quote, start_quote ], [ any_char, syn_error ]]
-    transition[ParserState.TOKEN] = [[ whitespace, end_token ], [ alphabetic, acc ], [ expr_delim, end_token ],
-            [ any_char, syn_error]]
-    transition[ParserState.QUOTED_STRING] = [[ escape, start_escape ], [ control, syn_error ], [ quote, end_quote ],
-            [ any_char, acc ]]
-    transition[ParserState.ESCAPE] = [[ any_char, acc_escape ]]
-    transition[ParserState.NUMBER] = [[ whitespace, end_number], [digit, acc], [expr_delim, end_number],
-            [any_char, syn_error]]
+    transition[ParserState.EXPRESSION] = [['whitespace', skip],
+            ['digit_nz', start_num], ['zero', lead_zero],
+            ['alphabetic', start_token], ['expr', expr],
+            ['quote', start_quote], ['any', syn_error]]
+    transition[ParserState.TOKEN] = [['whitespace', end_token],
+            ['alphabetic', acc], ['expr', end_token],
+            ['any', syn_error]]
+    transition[ParserState.QUOTED_STRING] = [['escape', start_escape],
+            ['control', syn_error], ['quote', end_quote],
+            ['any', acc]]
+    transition[ParserState.ESCAPE] = [['any', acc_escape]]
+    transition[ParserState.NUMBER] = [['whitespace', end_number],
+            ['digit', acc], ['expr', end_number], ['any', syn_error]]
+    transition[ParserState.LEAD_ZERO] = [['whitespace', end_number],
+            ['digit', cont_num], ['radix', radix], ['expr', end_number], ['any', syn_error]]
+    transition[ParserState.NUMBER_BIN_C1] = [['digit_bin', acc_c1], ['any', syn_error]]
+    transition[ParserState.NUMBER_OCT_C1] = [['digit_oct', acc_c1], ['any', syn_error]]
+    transition[ParserState.NUMBER_DEC_C1] = [['digit', acc_c1], ['any', syn_error]]
+    transition[ParserState.NUMBER_HEX_C1] = [['digit_hex', acc_c1], ['any', syn_error]]
+    transition[ParserState.NUMBER_BIN] = [['whitespace', end_number],
+            ['digit_bin', acc], ['expr', end_number], ['any', syn_error]]
+    transition[ParserState.NUMBER_OCT] = [['whitespace', end_number],
+            ['digit_oct', acc], ['expr', end_number], ['any', syn_error]]
+    transition[ParserState.NUMBER_HEX] = [['whitespace', end_number],
+            ['digit_hex', acc], ['expr', end_number], ['any', syn_error]]
 
     def parseline(self, s):
         st = self.state
@@ -319,8 +427,8 @@ class Parser:
             r = None
             c = s[st.colno]
             for t in self.transition[st.state]:
-                if t[0](self, c):
-                    debug(st.name(), c, t[0].__name__, t[1].__name__)
+                if getattr(self.cc, t[0])(c):
+                    debug(st.name(), c, t[0], t[1].__name__)
                     r = t[1](self, c)
                     break
             if r == None:
@@ -339,4 +447,5 @@ if __name__ == '__main__':
     r = Parser().loadf(sys.argv[1])
     print(r.dump())
     print(str(r))
+    print(r.to_list())
 
