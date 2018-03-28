@@ -14,7 +14,7 @@ class Atom:
         self.token = token
         ## Value is the interpretation of the token
         ## It can be any Python basic type
-        self.value = token
+        self.__value = token
         self.depth = depth
 
     def dump(self, initial_depth=None):
@@ -23,10 +23,13 @@ class Atom:
         return Expression.depth_str(self.depth - initial_depth) + type(self).__name__ + ': ' + str(self) + '\n'
 
     def value(self):
-        return self.value
+        return self.__value
 
     def to_list(self):
-        return self.value
+        return self.__value
+
+    def to_dict(self):
+        return self.__value
 
     def __str__(self):
         return self.token
@@ -39,14 +42,14 @@ class NumberDecimal(Atom):
     def __init__(self, token, depth=0):
         super().__init__(token, depth)
         if token[0:2] == '0d':
-            self.value = int(token[2:])
+            self.__value = int(token[2:])
         else:
-            self.value = int(token)
+            self.__value = int(token)
 
 class NumberBinary(Atom):
     def __init__(self, token, depth=0):
         super().__init__(token, depth)
-        self.value = eval(token)
+        self.__value = eval(token)
 
 class NumberOctal(NumberBinary):
     pass
@@ -448,4 +451,3 @@ if __name__ == '__main__':
     print(r.dump())
     print(str(r))
     print(r.to_list())
-
