@@ -7,15 +7,21 @@ equivalent to the input.
 
 I hope this will be tastier and healthier than your daily XML/JSON meal.
 
+# Implementation details
+
 The initial goal was to implement http://people.csail.mit.edu/rivest/Sexp.txt.
 However I realized that document does not define decimal numbers and I needed
 those. So the format is currently somewhat custom.
-
-# Implementation details
 
 Implementation is currently incomplete and have rough edges. Parsing is done
 directly rather than through a formal grammar / parser generator. It has no
 dependency. This is not a huge if/then/else either ;)
 
-Compared to the original spec, this implementation supports UTF-8 characters in
-quoted strings and binary, octal, decimal and hexadecimal numbers.
+Supported:
+* An atom can be: a token, a quoted string, a binary, octal, decimal,
+  hexadecimal number
+* UTF-8 characters in token: same lexical rules as for Python identifiers (it is
+  pretty complex)
+* Quoted strings: any UTF-8 character except control characters, that must be
+  escaped
+* Numbers: same lexical rules as for Python (relaxed concerning leading zeros)

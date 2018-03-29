@@ -1,20 +1,23 @@
 #!/usr/bin/python3
 import sys
+import unicodedata
+
+def no_debug(*args):
+    pass
 
 if __name__ == '__main__':
     def debug(*args):
         print(*args, file=sys.stderr)
 else:
-    def debug(*args):
-        pass
+    debug = no_debug
 
 class Atom:
-    def __init__(self, token, depth=0):
-        ## Token is the original string as it was parsed
-        self.token = token
-        ## Value is the interpretation of the token
+    def __init__(self, string, depth=0):
+        ## This is the original string as it was parsed
+        self.string = string
+        ## Value is the interpretation of the string
         ## It can be any Python basic type
-        self.__value = token
+        self.__value = string
         self.depth = depth
 
     def dump(self, initial_depth=None):
@@ -26,30 +29,44 @@ class Atom:
         return self.__value
 
     def to_list(self):
-        return self.__value
-
-    def to_dict(self):
-        return self.__value
+        return self.value()
 
     def __str__(self):
-        return self.token
+        return self.string
+
+class Token(Atom):
+    def __init__(self, string, depth=0):
+        super().__init__(string, depth)
+        ## Compute actual value
+        self.__value = ''
+        for c in self.string:
+            self.__value += Character.normalize(c)
+
+    def value(self):
+        return self.__value
 
 class QuotedString(Atom):
     def __str__(self):
-        return '"' + self.token + '"'
+        return '"' + self.string + '"'
 
 class NumberDecimal(Atom):
-    def __init__(self, token, depth=0):
-        super().__init__(token, depth)
-        if token[0:2] == '0d':
-            self.__value = int(token[2:])
+    def __init__(self, string, depth=0):
+        super().__init__(string, depth)
+        if string[0:2] == '0d':
+            self.__value = int(string[2:])
         else:
-            self.__value = int(token)
+            self.__value = int(string)
+
+    def value(self):
+        return self.__value
 
 class NumberBinary(Atom):
-    def __init__(self, token, depth=0):
-        super().__init__(token, depth)
-        self.__value = eval(token)
+    def __init__(self, string, depth=0):
+        super().__init__(string, depth)
+        self.__value = eval(string)
+
+    def value(self):
+        return self.__value
 
 class NumberOctal(NumberBinary):
     pass
@@ -138,12 +155,38 @@ class Character:
         cp = ord(c)
         return (cp >= 0 and cp <= 31) or cp == 127
 
-    def pseudo_alphabetic(c):
-        return c in [ '-', '.', '/', '_', ':', '*', '+', '=' ]
+    def id_start(c):
+        """ Implementing https://docs.python.org/3/reference/lexical_analysis.html#identifiers """
+        return unicodedata.category(c) in ['Lu', 'Ll', 'Lt', 'Lm', 'Lo', 'Nl'] \
+                or c == '_' or ord(c) in Character.Other_ID_Start
 
-    def alphabetic(c):
-        cp = ord(c)
-        return (cp >= 65 and cp < 91) or (cp >= 97 and cp < 123) or Character.pseudo_alphabetic(c)
+    def id_continue(c):
+        """ Implementing https://docs.python.org/3/reference/lexical_analysis.html#identifiers """
+        return Character.id_start(c) \
+                or unicodedata.category(c) in ['Mn', 'Mc', 'Nd', 'Pc'] \
+                or ord(c) in Character.Other_ID_Continue
+
+    def xid_start(c):
+        """ Implementing https://docs.python.org/3/reference/lexical_analysis.html#identifiers """
+        if not Character.id_start(c):
+            return False
+        cn = Character.normalize(c)
+        if not Character.id_start(cn[0]):
+            return False
+        for cf in cn[1:]:
+            if not Character.id_continue(cf):
+                return False
+        return True
+
+    def xid_continue(c):
+        """ Implementing https://docs.python.org/3/reference/lexical_analysis.html#identifiers """
+        if not Character.id_continue(c):
+            return False
+        cn = Character.normalize(c)
+        for cf in cn:
+            if not Character.id_continue(cf):
+                return False
+        return True
 
     def expr(c):
         return c in [ '(', ')' ]
@@ -191,6 +234,20 @@ class Character:
     def any(c):
         return True
 
+    ## Below that point: unicode utility stuff
+    def normalize(c):
+        """ Normalize as done for Python identifiers """
+        return unicodedata.normalize('NFKC', c)
+
+    """ Codepoints for property 'Other_ID_Start'.
+        See http://www.unicode.org/Public/9.0.0/ucd/PropList.txt """
+    Other_ID_Start = [ 0x1885, 0x1886, 0x2118, 0x212E, 0x309B, 0x309C ]
+
+    """ Codepoints for property 'Other_ID_Continue'.
+        See http://www.unicode.org/Public/9.0.0/ucd/PropList.txt """
+    Other_ID_Continue = [ 0x00B7, 0x0387, 0x19DA ]
+    Other_ID_Continue.extend(range(0x1369, 0x1371 + 1))
+
 class Parser:
     def __init__(self):
         self.state = ParserState()
@@ -212,6 +269,8 @@ class Parser:
     def loads(self, s):
         ## Assume only one line
         self.parseline(s)
+        ## TODO: hacky
+        self.parseline('\n')
         return self.end_of_input()
 
     def skip(self, c):
@@ -263,14 +322,14 @@ class Parser:
 
     def end_token(self, c):
         st = self.state
-        a = Atom(st.string, depth=st.depth)
+        a = Token(st.string, depth=st.depth)
         st.string = None
         if st.expr:
             st.expr.cons(a)
         else:
             assert(st.depth == 0)
             if st.root:
-                self.error('Root must be a token or a list')
+                self.error('Root must be an atom or a list')
             st.root = a
         st.state = ParserState.EXPRESSION
         return False
@@ -295,7 +354,7 @@ class Parser:
         else:
             assert(st.depth == 0)
             if st.root:
-                self.error('Root must be a token or a list')
+                self.error('Root must be an atom or a list')
             st.root = a
         st.state = ParserState.EXPRESSION
         return False
@@ -343,7 +402,9 @@ class Parser:
         return True
 
     def start_escape(self, c):
-        self.state.state = ParserState.ESCAPE
+        st = self.state
+        #st.string += c
+        st.state = ParserState.ESCAPE
         return True
 
     def acc_escape(self, c):
@@ -356,7 +417,7 @@ class Parser:
             st.string += ech[i]
             self.state.state = ParserState.QUOTED_STRING
         except ValueError:
-            syn_error(self, c)
+            self.syn_error(self, c)
         return True
 
     def end_quote(self, c):
@@ -368,7 +429,7 @@ class Parser:
         else:
             assert(st.depth == 0)
             if st.root:
-                self.error('Root must be a token or a list')
+                self.error('Root must be an atom or a list')
             st.root = a
         st.state = ParserState.EXPRESSION
         return True
@@ -395,10 +456,10 @@ class Parser:
     transition = [ 0 ] * ParserState.number()
     transition[ParserState.EXPRESSION] = [['whitespace', skip],
             ['digit_nz', start_num], ['zero', lead_zero],
-            ['alphabetic', start_token], ['expr', expr],
+            ['xid_start', start_token], ['expr', expr],
             ['quote', start_quote], ['any', syn_error]]
     transition[ParserState.TOKEN] = [['whitespace', end_token],
-            ['alphabetic', acc], ['expr', end_token],
+            ['xid_continue', acc], ['expr', end_token],
             ['any', syn_error]]
     transition[ParserState.QUOTED_STRING] = [['escape', start_escape],
             ['control', syn_error], ['quote', end_quote],
@@ -451,3 +512,6 @@ if __name__ == '__main__':
     print(r.dump())
     print(str(r))
     print(r.to_list())
+    debug = no_debug
+    ## That fails
+    #assert(Parser().loads(str(r)))

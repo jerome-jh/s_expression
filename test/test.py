@@ -17,15 +17,26 @@ class TestSexpression(unittest.TestCase):
         directory = os.path.join('test', 'success')
         for filename in scandir(directory):
             if is_file(filename):
+                print(filename)
                 threw = False
                 r = None
-                print(filename)
                 try:
                     r = s_expression.Parser().loadf(filename)
                 except Exception as e:
                     print('Threw', type(e), e)
                     threw = True
                 self.assertTrue(type(r) != type(None) and not threw)
+                ## Reparse str(r)
+                s = str(r)
+                threw = False
+                r = None
+                try:
+                    r = s_expression.Parser().loads(s)
+                except Exception as e:
+                    print('Threw', type(e), e)
+                    threw = True
+                ## TODO: that currently fails
+                #self.assertTrue(type(r) != type(None) and not threw)
 
     def test_parse_failure(self):
         directory = os.path.join('test', 'failure')
