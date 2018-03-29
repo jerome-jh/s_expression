@@ -12,12 +12,12 @@ else:
     debug = no_debug
 
 class Atom:
-    def __init__(self, string, depth=0):
+    def __init__(self, string, value, depth=0):
         ## This is the original string as it was parsed
         self.string = string
         ## Value is the interpretation of the string
         ## It can be any Python basic type
-        self.__value = string
+        self.__value = value
         self.depth = depth
 
     def dump(self, initial_depth=None):
@@ -35,43 +35,21 @@ class Atom:
         return self.string
 
 class Token(Atom):
-    def __init__(self, string, depth=0):
-        super().__init__(string, depth)
-        ## Compute actual value
-        self.__value = ''
-        for c in self.string:
-            self.__value += Character.normalize(c)
-
-    def value(self):
-        return self.__value
-
-class QuotedString(Atom):
-    def __str__(self):
-        return '"' + self.string + '"'
-
-class NumberDecimal(Atom):
-    def __init__(self, string, depth=0):
-        super().__init__(string, depth)
-        if string[0:2] == '0d':
-            self.__value = int(string[2:])
-        else:
-            self.__value = int(string)
-
-    def value(self):
-        return self.__value
-
-class NumberBinary(Atom):
-    def __init__(self, string, depth=0):
-        super().__init__(string, depth)
-        self.__value = eval(string)
-
-    def value(self):
-        return self.__value
-
-class NumberOctal(NumberBinary):
     pass
 
-class NumberHexadecimal(NumberBinary):
+class QuotedString(Atom):
+    pass
+
+class NumberDecimal(Atom):
+    pass
+
+class NumberBinary(Atom):
+    pass
+
+class NumberOctal(Atom):
+    pass
+
+class NumberHexadecimal(Atom):
     pass
 
 class Expression:
@@ -123,6 +101,8 @@ class ParserState:
         self.state = 0
         ## Accumulator string when parsing an atom
         self.string = None
+        ## Current value of the atom
+        self.value = None
         ## Current expression
         self.expr = None
         ## Root node
@@ -316,14 +296,22 @@ class Parser:
 
     def start_token(self, c):
         st = self.state
-        st.string = '%c'%c
+        st.string = c
+        st.value = Character.normalize(c)
         st.state = ParserState.TOKEN
+        return True
+
+    def cont_token(self, c):
+        st = self.state
+        st.string += c
+        st.value += Character.normalize(c)
         return True
 
     def end_token(self, c):
         st = self.state
-        a = Token(st.string, depth=st.depth)
+        a = Token(st.string, st.value, depth=st.depth)
         st.string = None
+        st.value = None
         if st.expr:
             st.expr.cons(a)
         else:
@@ -333,22 +321,30 @@ class Parser:
             st.root = a
         st.state = ParserState.EXPRESSION
         return False
+
+    def start_num(self, c):
+        st = self.state
+        st.string = c
+        st.value = int(c)
+        st.state = ParserState.NUMBER
+        return True
 
     def end_number(self, c):
         st = self.state
         if st.state == ParserState.NUMBER or st.state == ParserState.LEAD_ZERO:
             ## decimal number or lone zero
-            a = NumberDecimal(st.string, depth=st.depth)
+            a = NumberDecimal(st.string, st.value, depth=st.depth)
         else:
             if st.state == ParserState.NUMBER_BIN:
-                a = NumberBinary(st.string, depth=st.depth)
+                a = NumberBinary(st.string, st.value, depth=st.depth)
             elif st.state == ParserState.NUMBER_OCT:
-                a = NumberOctal(st.string, depth=st.depth)
+                a = NumberOctal(st.string, st.value, depth=st.depth)
             elif st.state == ParserState.NUMBER_HEX:
-                a = NumberHexadecimal(st.string, depth=st.depth)
+                a = NumberHexadecimal(st.string, st.value, depth=st.depth)
             else:
                 self.error('Program bug!')
         st.string = None
+        st.value = None
         if st.expr:
             st.expr.cons(a)
         else:
@@ -359,25 +355,34 @@ class Parser:
         st.state = ParserState.EXPRESSION
         return False
 
-    def end_hex(self, c):
-        return True
-
-    def start_num(self, c):
-        st = self.state
-        st.string = c
-        st.state = ParserState.NUMBER
-        return True
-
     def lead_zero(self, c):
         st = self.state
         st.string = c
+        st.value = 0
         st.state = ParserState.LEAD_ZERO
         return True
 
-    def cont_num(self, c):
+    def cont_num(self, c, radix):
         st = self.state
         st.string += c
-        st.state = ParserState.NUMBER
+        st.value = st.value * radix + int(c, base=radix)
+        return True
+
+    def cont_dec(self, c):
+        self.cont_num(c, 10)
+        self.state.state = ParserState.NUMBER
+        return True
+
+    def cont_bin(self, c):
+        self.cont_num(c, 2)
+        return True
+
+    def cont_oct(self, c):
+        self.cont_num(c, 8)
+        return True
+
+    def cont_hex(self, c):
+        self.cont_num(c, 16)
         return True
 
     def radix(self, c):
@@ -397,24 +402,32 @@ class Parser:
 
     def start_quote(self, c):
         st = self.state
-        st.string = ''
+        st.string = c
+        st.value = ''
         st.state = ParserState.QUOTED_STRING
+        return True
+
+    def cont_quoted(self, c):
+        st = self.state
+        st.string += c
+        st.value += c
         return True
 
     def start_escape(self, c):
         st = self.state
-        #st.string += c
+        st.string += c
         st.state = ParserState.ESCAPE
         return True
 
-    def acc_escape(self, c):
+    def cont_escape(self, c):
         ## Only single char escapes supported for now
         st = self.state
         ch = 'btvnfr"\'\r\n'
         ech = [ '\b', '\t', '\v', '\n', '\f', '\r', '"', "'", '', '' ]
         try:
             i = ch.index(c)
-            st.string += ech[i]
+            st.string += c
+            st.value += ech[i]
             self.state.state = ParserState.QUOTED_STRING
         except ValueError:
             self.syn_error(self, c)
@@ -422,8 +435,10 @@ class Parser:
 
     def end_quote(self, c):
         st = self.state
-        a = QuotedString(st.string, depth=st.depth)
+        st.string += c
+        a = QuotedString(st.string, st.value, depth=st.depth)
         st.string = None
+        st.value = None
         if st.expr:
             st.expr.cons(a)
         else:
@@ -436,21 +451,21 @@ class Parser:
 
     def acc_c1(self, c):
         st = self.state
+        st.string += c
         if st.state == ParserState.NUMBER_BIN_C1:
             st.state = ParserState.NUMBER_BIN
+            st.value = int(c)
         elif st.state == ParserState.NUMBER_OCT_C1:
             st.state = ParserState.NUMBER_OCT
+            st.value = int(c)
         elif st.state == ParserState.NUMBER_DEC_C1:
             st.state = ParserState.NUMBER
+            st.value = int(c)
         elif st.state == ParserState.NUMBER_HEX_C1:
             st.state = ParserState.NUMBER_HEX
+            st.value = int(c, base=16)
         else:
             self.error('Program bug!')
-        self.state.string += c
-        return True
-
-    def acc(self, c):
-        self.state.string += c
         return True
 
     transition = [ 0 ] * ParserState.number()
@@ -459,26 +474,26 @@ class Parser:
             ['xid_start', start_token], ['expr', expr],
             ['quote', start_quote], ['any', syn_error]]
     transition[ParserState.TOKEN] = [['whitespace', end_token],
-            ['xid_continue', acc], ['expr', end_token],
+            ['xid_continue', cont_token], ['expr', end_token],
             ['any', syn_error]]
     transition[ParserState.QUOTED_STRING] = [['escape', start_escape],
             ['control', syn_error], ['quote', end_quote],
-            ['any', acc]]
-    transition[ParserState.ESCAPE] = [['any', acc_escape]]
+            ['any', cont_quoted]]
+    transition[ParserState.ESCAPE] = [['any', cont_escape]]
     transition[ParserState.NUMBER] = [['whitespace', end_number],
-            ['digit', acc], ['expr', end_number], ['any', syn_error]]
+            ['digit', cont_dec], ['expr', end_number], ['any', syn_error]]
     transition[ParserState.LEAD_ZERO] = [['whitespace', end_number],
-            ['digit', cont_num], ['radix', radix], ['expr', end_number], ['any', syn_error]]
+            ['digit', cont_dec], ['radix', radix], ['expr', end_number], ['any', syn_error]]
     transition[ParserState.NUMBER_BIN_C1] = [['digit_bin', acc_c1], ['any', syn_error]]
     transition[ParserState.NUMBER_OCT_C1] = [['digit_oct', acc_c1], ['any', syn_error]]
     transition[ParserState.NUMBER_DEC_C1] = [['digit', acc_c1], ['any', syn_error]]
     transition[ParserState.NUMBER_HEX_C1] = [['digit_hex', acc_c1], ['any', syn_error]]
     transition[ParserState.NUMBER_BIN] = [['whitespace', end_number],
-            ['digit_bin', acc], ['expr', end_number], ['any', syn_error]]
+            ['digit_bin', cont_bin], ['expr', end_number], ['any', syn_error]]
     transition[ParserState.NUMBER_OCT] = [['whitespace', end_number],
-            ['digit_oct', acc], ['expr', end_number], ['any', syn_error]]
+            ['digit_oct', cont_oct], ['expr', end_number], ['any', syn_error]]
     transition[ParserState.NUMBER_HEX] = [['whitespace', end_number],
-            ['digit_hex', acc], ['expr', end_number], ['any', syn_error]]
+            ['digit_hex', cont_hex], ['expr', end_number], ['any', syn_error]]
 
     def parseline(self, s):
         st = self.state
@@ -509,9 +524,14 @@ class Parser:
 
 if __name__ == '__main__':
     r = Parser().loadf(sys.argv[1])
+    assert(type(r) != type(None))
     print(r.dump())
     print(str(r))
     print(r.to_list())
     debug = no_debug
-    ## That fails
-    #assert(Parser().loads(str(r)))
+    r2 = Parser().loads(str(r))
+    assert(type(r2) != type(None))
+    assert(str(r) == str(r2))
+
+##TODO:
+## Parse negative integers

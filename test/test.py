@@ -35,8 +35,8 @@ class TestSexpression(unittest.TestCase):
                 except Exception as e:
                     print('Threw', type(e), e)
                     threw = True
-                ## TODO: that currently fails
-                #self.assertTrue(type(r) != type(None) and not threw)
+                self.assertTrue(type(r) != type(None) and not threw)
+                self.assertTrue(s == str(r))
 
     def test_parse_failure(self):
         directory = os.path.join('test', 'failure')
