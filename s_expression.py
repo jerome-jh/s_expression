@@ -167,8 +167,10 @@ class Character:
     def escape(c):
         return c == '\\'
 
+    escaped_char = 'btvnfr"\'\r\n'
+
     def escape_char(c):
-        return c in 'btvnfr"\'\r\n'
+        return c in Character.escaped_char
 
 #    def reserved(c):
 #        return c in [ '[', ']', '{', '}', '|', '#', '&' ]
@@ -205,7 +207,7 @@ class Character:
         return c == 'o'
 
     def radix_hex(c):
-        return c == 'h'
+        return c == 'x'
 
     def any(c):
         return True
@@ -288,6 +290,7 @@ class Lexer:
         self.string += c
 
     def cont_escape(self, c):
+        ch = Character.escaped_char
         ech = [ '\b', '\t', '\v', '\n', '\f', '\r', '"', "'", '', '' ]
         try:
             i = ch.index(c)
@@ -340,15 +343,15 @@ class Parser:
     def syn_error(self, c='', msg=None):
         """ Syntax error while parsing """
         if type(msg) != type(None):
-            raise SyntaxError("Syntax Error: unexpected char '%c' while parsing %s\nLine: %d Col: %d\n%s"\
-                    %(c.encode(encoding="ascii", errors="surrogateescape"), State.name(self.state),\
+            raise SyntaxError("Syntax Error: unexpected char %s while parsing %s\nLine: %d Col: %d\n%s"\
+                    %(c.encode(encoding='ascii', errors='backslashreplace'), State.name(self.state),\
                     self.lineno, self.colno + 1, msg))
         else:
-            raise SyntaxError("Syntax Error: unexpected char '%c' while parsing %s\nLine: %d Col: %d"\
-                    %(c.encode(encoding="ascii", errors="surrogateescape"), State.name(self.state),\
+            raise SyntaxError("Syntax Error: unexpected char %s while parsing %s\nLine: %d Col: %d"\
+                    %(c.encode(encoding='ascii', errors='backslashreplace'), State.name(self.state),\
                     self.lineno, self.colno + 1))
 
-    def parse_error(self, c='', msg=None):
+    def parse_error(self, msg):
         raise Exception('Parse Error\nLine: %d Col: %d\n%s'%(self.lineno, self.colno + 1, msg))
 
     def error(self, msg):
@@ -399,15 +402,15 @@ class Parser:
         self.add_atom(a)
 
     def end_bin(self, c):
-        a = NumberBinary(self.string, self.value, depth=self.depth)
+        a = NumberBinary(self.lex.string, self.lex.value, depth=self.depth)
         self.add_atom(a)
 
     def end_oct(self, c):
-        a = NumberOctal(self.string, self.value, depth=self.depth)
+        a = NumberOctal(self.lex.string, self.lex.value, depth=self.depth)
         self.add_atom(a)
 
     def end_hex(self, c):
-        a = NumberHexadecimal(self.string, self.value, depth=self.depth)
+        a = NumberHexadecimal(self.lex.string, self.lex.value, depth=self.depth)
         self.add_atom(a)
 
     transition = [ 0 ] * State.number()
