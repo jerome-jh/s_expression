@@ -17,7 +17,8 @@ Supported:
   is pretty complex)
 * Quoted strings: any UTF-8 character except control characters, that must be
   escaped
-* Numbers: same lexical rules as for Python (relaxed concerning leading zeros)
+* Numbers: same lexical rules as for Python, but relaxed concerning leading
+  zeros: basically everything that is accepted by the builtin int()
 
 The initial goal was to implement http://people.csail.mit.edu/rivest/Sexp.txt.
 However I realized it does not define decimal numbers and I needed those. Also

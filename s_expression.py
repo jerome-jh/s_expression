@@ -94,7 +94,10 @@ class Expression:
 
 class State:
     """ The parser states """
-    state_name = [ 'EXPRESSION', 'TOKEN', 'QUOTED_STRING', 'HEX_STRING', 'ESCAPE', 'LEAD_ZERO', 'NUMBER_BIN', 'NUMBER_OCT', 'NUMBER_DEC', 'NUMBER_HEX', 'NUMBER_BIN_C1', 'NUMBER_OCT_C1', 'NUMBER_DEC_C1', 'NUMBER_HEX_C1' ]
+    state_name = [ 'EXPRESSION', 'TOKEN', 'QUOTED_STRING', 'HEX_STRING', 'ESCAPE',
+        'LEAD_ZERO', 'NUMBER_BIN', 'NUMBER_OCT', 'NUMBER_DEC', 'NUMBER_HEX',
+        'NUMBER_BIN_C1', 'NUMBER_OCT_C1', 'NUMBER_DEC_C1', 'NUMBER_DEC_C1', 'NUMBER_HEX_C1'
+    ]
 
     def number():
         return len(State.state_name)
@@ -183,6 +186,9 @@ class Character:
         cp = ord(c)
         return cp >= ord('0') and cp <= ord('9')
 
+    def sign(c):
+        return c == '-' or c == '+'
+
     def digit_bin(c):
         return c in [ '0', '1' ]
 
@@ -238,6 +244,8 @@ class Lexer:
         self.string = None
         ## This is the token value
         self.value = None
+        ## This is the sign when parsing a number
+        self.sign = None
 
     def skip(self, c):
         pass
@@ -254,9 +262,17 @@ class Lexer:
         self.string = c
         self.value = int(c)
 
+    def start_signed_dec(self, c):
+        self.string = c
+        self.value = 0
+        self.sign = int(c + '1')
+
     def cont_num(self, c, radix):
         self.string += c
-        self.value = self.value * radix + int(c, base=radix)
+        if type(self.sign) != type(None):
+            self.value = self.sign * (self.value * radix + int(c, base=radix))
+        else:
+            self.value = self.value * radix + int(c, base=radix)
 
     def cont_dec(self, c):
         self.cont_num(c, 10)
@@ -421,12 +437,12 @@ class Parser:
     def syn_error(self, c='', msg=None):
         """ Syntax error while parsing """
         if type(msg) != type(None):
-            raise SyntaxError("Syntax Error: unexpected char '%s' while parsing %s\n"
+            raise SyntaxError("unexpected char '%s' while parsing %s\n"
                     "Line: %d Col: %d\n%s"\
                     %(self.print_char(c), State.name(self.state),\
                     self.lineno, self.colno + 1, msg))
         else:
-            raise SyntaxError("Syntax Error: unexpected char '%s' while parsing %s\n"
+            raise SyntaxError("unexpected char '%s' while parsing %s\n"
                     "Line: %d Col: %d"\
                     %(self.print_char(c), State.name(self.state),\
                     self.lineno, self.colno + 1))
@@ -444,6 +460,7 @@ class Parser:
         ['whitespace', 'lex.skip', True],
         ['digit_nz', 'lex.start_dec', True, State.NUMBER_DEC],
         ['zero', 'lex.start_dec', True, State.LEAD_ZERO],
+        ['sign', 'lex.start_signed_dec', True, State.NUMBER_DEC_C1],
         ['xid_start', 'lex.start_token', True, State.TOKEN],
         ['start_expr', 'ast.start_expr', True],
         ['end_expr', 'ast.end_expr', True],
@@ -473,16 +490,14 @@ class Parser:
         ['radix_hex', 'lex.radix', True, State.NUMBER_HEX_C1],
         ['expr', 'ast.end_dec', False, State.EXPRESSION],
     ]
-    transition[State.NUMBER_DEC] = [
-        ['whitespace', 'ast.end_dec', True, State.EXPRESSION],
-        ['digit', 'lex.cont_dec', True],
-        ['expr', 'ast.end_dec', False, State.EXPRESSION],
-    ]
     transition[State.NUMBER_BIN_C1] = [
         ['digit_bin', 'lex.cont_bin', True, State.NUMBER_BIN]
     ]
     transition[State.NUMBER_OCT_C1] = [
         ['digit_oct', 'lex.cont_oct', True, State.NUMBER_OCT]
+    ]
+    transition[State.NUMBER_DEC_C1] = [
+        ['digit', 'lex.cont_dec', True, State.NUMBER_DEC]
     ]
     transition[State.NUMBER_HEX_C1] = [
         ['digit_hex', 'lex.cont_hex', True, State.NUMBER_HEX]
@@ -496,6 +511,11 @@ class Parser:
         ['whitespace', 'ast.end_oct', True, State.EXPRESSION],
         ['digit_oct', 'lex.cont_oct', True],
         ['expr', 'ast.end_oct', False, State.EXPRESSION],
+    ]
+    transition[State.NUMBER_DEC] = [
+        ['whitespace', 'ast.end_dec', True, State.EXPRESSION],
+        ['digit', 'lex.cont_dec', True],
+        ['expr', 'ast.end_dec', False, State.EXPRESSION],
     ]
     transition[State.NUMBER_HEX] = [
         ['whitespace', 'ast.end_hex', True, State.EXPRESSION],
@@ -554,6 +574,3 @@ if __name__ == '__main__':
     r2 = Parser().loads(str(r))
     assert(type(r2) != type(None))
     assert(str(r) == str(r2))
-
-##TODO:
-## Parse negative integers
