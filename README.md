@@ -17,7 +17,8 @@ Supported:
   is pretty complex)
 * Quoted strings: any UTF-8 character except control characters, that must be
   escaped
-* Numbers: same lexical rules as for Python (relaxed concerning leading zeros)
+* Numbers: same lexical rules as for Python, but relaxed concerning leading
+  zeros: basically everything that is accepted by the builtin int()
 
 The initial goal was to implement http://people.csail.mit.edu/rivest/Sexp.txt.
 However I realized it does not define decimal numbers and I needed those. Also
@@ -25,6 +26,6 @@ raw bytes strings looked cool initially but won't mix well with Unicode unless
 I implement my own decoding, which is not foreseen. So the format is currently
 somewhat custom.
 
-Implementation may have rough edges. Parsing is done directly rather than
-through a formal grammar / parser generator. It has no dependency. This is not a
-huge if/then/else either ;)
+Parsing is done directly with a hand-written FSA. There is no formal grammar
+or parser generator involved, and there is no dependency besides standard 
+Python libraries. It has been developped and tested with Python3 ;)
