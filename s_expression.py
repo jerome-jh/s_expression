@@ -158,8 +158,12 @@ class Character:
     def end_expr(c):
         return c == ')'
 
+    EOF_char = '\0'
+    def EOF(c):
+        return c == Character.EOF_char
+
     def expr(c):
-        return Character.start_expr(c) or Character.end_expr(c)
+        return Character.start_expr(c) or Character.end_expr(c) or Character.EOF(c)
 
     def quote(c):
         return c == '"'
@@ -174,9 +178,6 @@ class Character:
 
 #    def reserved(c):
 #        return c in [ '[', ']', '{', '}', '|', '#', '&' ]
-
-#    def utf8(c):
-#        return ord(c) >= 128
 
     def digit(c):
         cp = ord(c)
@@ -299,65 +300,21 @@ class Lexer:
         except ValueError:
             raise Exception('Program bug')
 
-class Parser:
+class AST:
     def __init__(self):
-        ## Current parser state
-        self.state = State.EXPRESSION
         ## Current expression
         self.expr = None
         ## Root node
         self.root = None
-        ## Current line number
-        self.lineno = 0
-        ## Current column number
-        self.colno = 0
         ## Current depth: useless during parsing
         ## It is used in the __str__ methods. May have other uses.
         self.depth = 0
-        ## Reference to Character class (no pun intended)
-        self.cc = Character
-        ## Our lexer
-        self.lex = Lexer()
-        assert(State.number() == len(Parser.transition))
-
-    def loadf(self, filename):
-        f = open(filename, 'r', encoding='utf-8')
-        try:
-            s = f.readline()
-            while s:
-                self.parseline(s)
-                s = f.readline()
-        except Exception as e:
-            f.close()
-            raise e
-        f.close()
-        return self.end_of_input()
-
-    def loads(self, s):
-        ## Assume only one line
-        self.parseline(s)
-        ## TODO: hacky
-        self.parseline('\n')
-        return self.end_of_input()
-
-    def syn_error(self, c='', msg=None):
-        """ Syntax error while parsing """
-        if type(msg) != type(None):
-            raise SyntaxError("Syntax Error: unexpected char %s while parsing %s\nLine: %d Col: %d\n%s"\
-                    %(c.encode(encoding='ascii', errors='backslashreplace'), State.name(self.state),\
-                    self.lineno, self.colno + 1, msg))
-        else:
-            raise SyntaxError("Syntax Error: unexpected char %s while parsing %s\nLine: %d Col: %d"\
-                    %(c.encode(encoding='ascii', errors='backslashreplace'), State.name(self.state),\
-                    self.lineno, self.colno + 1))
 
     def parse_error(self, msg):
-        raise Exception('Parse Error\nLine: %d Col: %d\n%s'%(self.lineno, self.colno + 1, msg))
+        ## The exception is caught by the Parser
+        raise Exception(msg)
 
-    def error(self, msg):
-        raise Exception('%s\nLine: %d Col: %d' % (msg, self.lineno, self.colno + 1))
-
-    def start_expr(self, c):
+    def start_expr(self, string, value):
         """ Expression start """
         if self.depth == 0:
             self.expr = Expression()
@@ -365,7 +322,7 @@ class Parser:
             self.expr = Expression(parent=self.expr, depth=self.depth)
         self.depth += 1
 
-    def end_expr(self, c):
+    def end_expr(self, string, value):
         """ Expression end """
         if self.depth == 0:
             self.parse_error('Too many closing parenthesis')
@@ -384,34 +341,98 @@ class Parser:
         else:
             assert(self.depth == 0)
             if self.root:
-                self.error('Root must be an atom or a list')
+                self.parse_error('Root must be an atom or a list')
             self.root = a
-        self.lex.reset()
 
-    def end_token(self, c):
-        a = Token(self.lex.string, self.lex.value, depth=self.depth)
+    def end_token(self, string, value):
+        a = Token(string, value, depth=self.depth)
         self.add_atom(a)
 
-    def end_quote(self, c):
-        a = QuotedString(self.lex.string, self.lex.value, depth=self.depth)
+    def end_quote(self, string, value):
+        a = QuotedString(string, value, depth=self.depth)
         self.add_atom(a)
 
-    def end_dec(self, c):
+    def end_dec(self, string, value):
         ## decimal number or lone zero
-        a = NumberDecimal(self.lex.string, self.lex.value, depth=self.depth)
+        a = NumberDecimal(string, value, depth=self.depth)
         self.add_atom(a)
 
-    def end_bin(self, c):
-        a = NumberBinary(self.lex.string, self.lex.value, depth=self.depth)
+    def end_bin(self, string, value):
+        a = NumberBinary(string, value, depth=self.depth)
         self.add_atom(a)
 
-    def end_oct(self, c):
-        a = NumberOctal(self.lex.string, self.lex.value, depth=self.depth)
+    def end_oct(self, string, value):
+        a = NumberOctal(string, value, depth=self.depth)
         self.add_atom(a)
 
-    def end_hex(self, c):
-        a = NumberHexadecimal(self.lex.string, self.lex.value, depth=self.depth)
+    def end_hex(self, string, value):
+        a = NumberHexadecimal(string, value, depth=self.depth)
         self.add_atom(a)
+
+    def end_of_input(self, string, value):
+        if self.depth != 0:
+            self.parse_error('Missing closing parenthesis')
+
+class Parser:
+    def __init__(self):
+        ## Current parser state
+        self.state = State.EXPRESSION
+        ## Current line number
+        self.lineno = 0
+        ## Current column number
+        self.colno = 0
+        ## Reference to Character class (no pun intended)
+        self.cc = Character
+        ## Our lexer
+        self.lex = Lexer()
+        ## The Abstract Syntax Tree
+        self.ast = AST()
+        assert(State.number() == len(Parser.transition))
+
+    def loadf(self, filename):
+        f = open(filename, 'r', encoding='utf-8')
+        try:
+            s = f.readline()
+            while s:
+                self.parseline(s)
+                s = f.readline()
+        except Exception as e:
+            f.close()
+            raise e
+        f.close()
+        self.parseline((Character.EOF_char,))
+        assert(type(self.ast.root) != type(None))
+        return self.ast.root
+
+    def loads(self, s):
+        ## Assume only one line
+        self.parseline(s)
+        self.parseline((Character.EOF_char,))
+        assert(type(self.ast.root) != type(None))
+        return self.ast.root
+
+    def print_char(self, c):
+        """ Return a string representing c for human cunsumption, i.e.
+            control characters are escaped """
+        s = str(c.encode(encoding='utf-8', errors='backslashreplace'))
+        ## Strip string prefix and quotes
+        return s[2:-1]
+
+    def syn_error(self, c='', msg=None):
+        """ Syntax error while parsing """
+        if type(msg) != type(None):
+            raise SyntaxError("Syntax Error: unexpected char '%s' while parsing %s\n"
+                    "Line: %d Col: %d\n%s"\
+                    %(self.print_char(c), State.name(self.state),\
+                    self.lineno, self.colno + 1, msg))
+        else:
+            raise SyntaxError("Syntax Error: unexpected char '%s' while parsing %s\n"
+                    "Line: %d Col: %d"\
+                    %(self.print_char(c), State.name(self.state),\
+                    self.lineno, self.colno + 1))
+
+    def parse_error(self, e):
+        raise Exception('Parse Error\nLine: %d Col: %d\n%s'%(self.lineno, self.colno + 1, str(e)))
 
     transition = [ 0 ] * State.number()
     ## Format of transition table is:
@@ -424,18 +445,19 @@ class Parser:
         ['digit_nz', 'lex.start_dec', True, State.NUMBER_DEC],
         ['zero', 'lex.start_dec', True, State.LEAD_ZERO],
         ['xid_start', 'lex.start_token', True, State.TOKEN],
-        ['start_expr', 'start_expr', True],
-        ['end_expr', 'end_expr', True],
+        ['start_expr', 'ast.start_expr', True],
+        ['end_expr', 'ast.end_expr', True],
         ['quote', 'lex.start_quote', True, State.QUOTED_STRING],
+        ['EOF', 'ast.end_of_input', True],
     ]
     transition[State.TOKEN] = [
-        ['whitespace', 'end_token', True, State.EXPRESSION],
+        ['whitespace', 'ast.end_token', True, State.EXPRESSION],
         ['xid_continue', 'lex.cont_token', True],
-        ['expr', 'end_token', False, State.EXPRESSION],
+        ['expr', 'ast.end_token', False, State.EXPRESSION],
     ]
     transition[State.QUOTED_STRING] = [
         ['escape', 'lex.start_escape', True, State.ESCAPE],
-        ['quote', ['lex.end_quote', 'end_quote'], True, State.EXPRESSION],
+        ['quote', ['lex.end_quote', 'ast.end_quote'], True, State.EXPRESSION],
         ['control', 'syn_error'],
         ['any', 'lex.cont_quote', True]
     ]
@@ -444,17 +466,17 @@ class Parser:
         ['escape_char', 'lex.cont_escape', True, State.QUOTED_STRING]
     ]
     transition[State.LEAD_ZERO] = [
-        ['whitespace', 'end_dec', True, State.EXPRESSION],
+        ['whitespace', 'ast.end_dec', True, State.EXPRESSION],
         ['digit', 'lex.cont_dec', True, State.NUMBER_DEC],
         ['radix_bin', 'lex.radix', True, State.NUMBER_BIN_C1],
         ['radix_oct', 'lex.radix', True, State.NUMBER_OCT_C1],
         ['radix_hex', 'lex.radix', True, State.NUMBER_HEX_C1],
-        ['expr', 'end_dec', False, State.EXPRESSION],
+        ['expr', 'ast.end_dec', False, State.EXPRESSION],
     ]
     transition[State.NUMBER_DEC] = [
-        ['whitespace', 'end_dec', True, State.EXPRESSION],
+        ['whitespace', 'ast.end_dec', True, State.EXPRESSION],
         ['digit', 'lex.cont_dec', True],
-        ['expr', 'end_dec', False, State.EXPRESSION],
+        ['expr', 'ast.end_dec', False, State.EXPRESSION],
     ]
     transition[State.NUMBER_BIN_C1] = [
         ['digit_bin', 'lex.cont_bin', True, State.NUMBER_BIN]
@@ -466,19 +488,19 @@ class Parser:
         ['digit_hex', 'lex.cont_hex', True, State.NUMBER_HEX]
     ]
     transition[State.NUMBER_BIN] = [
-        ['whitespace', 'end_bin', True, State.EXPRESSION],
+        ['whitespace', 'ast.end_bin', True, State.EXPRESSION],
         ['digit_bin', 'lex.cont_bin', True],
-        ['expr', 'end_bin', False, State.EXPRESSION],
+        ['expr', 'ast.end_bin', False, State.EXPRESSION],
     ]
     transition[State.NUMBER_OCT] = [
-        ['whitespace', 'end_oct', True, State.EXPRESSION],
+        ['whitespace', 'ast.end_oct', True, State.EXPRESSION],
         ['digit_oct', 'lex.cont_oct', True],
-        ['expr', 'end_oct', False, State.EXPRESSION],
+        ['expr', 'ast.end_oct', False, State.EXPRESSION],
     ]
     transition[State.NUMBER_HEX] = [
-        ['whitespace', 'end_hex', True, State.EXPRESSION],
+        ['whitespace', 'ast.end_hex', True, State.EXPRESSION],
         ['digit_hex', 'lex.cont_hex', True],
-        ['expr', 'end_hex', False, State.EXPRESSION],
+        ['expr', 'ast.end_hex', False, State.EXPRESSION],
     ]
 
     def parseline(self, s):
@@ -503,7 +525,14 @@ class Parser:
                     for a in act_method:
                         debug(State.name(self.state), c, check_method, a)
                         f = eval('self.' + a)
-                        f(c)
+                        if a.startswith('lex.'):
+                            f(c)
+                        elif a.startswith('ast.'):
+                            try:
+                                f(self.lex.string, self.lex.value)
+                            except Exception as e:
+                                self.parse_error(e)
+                            self.lex.reset()
                     trans = t
                     break
             if not trans:
@@ -514,11 +543,6 @@ class Parser:
             if len(trans) > 3:
                 ## State transition
                 self.state = trans[3]
-
-    def end_of_input(self):
-        if self.depth != 0:
-            self.parse_error('Missing closing parenthesis')
-        return self.root
 
 if __name__ == '__main__':
     r = Parser().loadf(sys.argv[1])
