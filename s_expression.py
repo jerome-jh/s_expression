@@ -53,10 +53,15 @@ class NumberHexadecimal(Atom):
     pass
 
 class Expression:
-    def __init__(self, parent=None, depth=0):
+    def __init__(self, value, parent=None, depth=0):
         self.parent = parent
         self.child = list()
         self.depth = depth
+        self.bracket_type = value
+
+    def close(self, value):
+        if value != self.bracket_type:
+            raise SyntaxError("Mismatched parenthesis")
 
     def cons(self, expression):
         self.child.append(expression)
@@ -156,10 +161,16 @@ class Character:
         return True
 
     def start_expr(c):
-        return c == '('
+        try:
+            return [ '(', '{', '[' ].index(c) + 1
+        except ValueError:
+            return 0
 
     def end_expr(c):
-        return c == ')'
+        try:
+            return [ ')', '}', ']' ].index(c) + 1
+        except ValueError:
+            return 0
 
     EOF_char = '\0'
     def EOF(c):
@@ -250,6 +261,14 @@ class Lexer:
     def skip(self, c):
         pass
 
+    def start_expr(self, c):
+        self.string = c
+        self.value = Character.start_expr(c)
+
+    def end_expr(self, c):
+        self.string = c
+        self.value = Character.end_expr(c)
+
     def start_token(self, c):
         self.string = c
         self.value = Character.normalize(c)
@@ -333,9 +352,9 @@ class AST:
     def start_expr(self, string, value):
         """ Expression start """
         if self.depth == 0:
-            self.expr = Expression()
+            self.expr = Expression(value)
         else:
-            self.expr = Expression(parent=self.expr, depth=self.depth)
+            self.expr = Expression(value, parent=self.expr, depth=self.depth)
         self.depth += 1
 
     def end_expr(self, string, value):
@@ -343,6 +362,7 @@ class AST:
         if self.depth == 0:
             self.parse_error('Too many closing parenthesis')
         self.depth -= 1
+        self.expr.close(value)
         if self.expr.parent:
             self.expr.parent.cons(self.expr)
         else:
@@ -462,8 +482,8 @@ class Parser:
         ['zero', 'lex.start_dec', True, State.LEAD_ZERO],
         ['sign', 'lex.start_signed_dec', True, State.NUMBER_DEC_C1],
         ['xid_start', 'lex.start_token', True, State.TOKEN],
-        ['start_expr', 'ast.start_expr', True],
-        ['end_expr', 'ast.end_expr', True],
+        ['start_expr', ['lex.start_expr', 'ast.start_expr'], True],
+        ['end_expr', ['lex.end_expr', 'ast.end_expr'], True],
         ['quote', 'lex.start_quote', True, State.QUOTED_STRING],
         ['EOF', 'ast.end_of_input', True],
     ]
