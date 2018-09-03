@@ -60,7 +60,7 @@ class Expression:
         self.bracket_type = value
 
     def close(self, value):
-        if value != self.bracket_type:
+        if self.bracket_type > 0 and value > 0 and value != self.bracket_type:
             raise SyntaxError("Mismatched parenthesis")
 
     def cons(self, expression):
@@ -127,6 +127,9 @@ class Character:
         cp = ord(c)
         return (cp >= 0 and cp <= 31) or cp == 127
 
+    def sentence_sep(c):
+        return c == ';'
+
     def id_start(c):
         """ Implementing https://docs.python.org/3/reference/lexical_analysis.html#identifiers """
         return unicodedata.category(c) in ['Lu', 'Ll', 'Lt', 'Lm', 'Lo', 'Nl'] \
@@ -164,13 +167,23 @@ class Character:
         try:
             return [ '(', '{', '[' ].index(c) + 1
         except ValueError:
-            return 0
+            try:
+                ## Non specific start of expression matches any bracket type
+                ## Return negative value
+                return - ([ ';' ].index(c) + 1)
+            except ValueError:
+                return 0 # False
 
     def end_expr(c):
         try:
-            return [ ')', '}', ']' ].index(c) + 1
+            return [ ')', '}', ']', ';' ].index(c) + 1
         except ValueError:
-            return 0
+            try:
+                ## Non specific end of expression matches any bracket type
+                ## Return negative value
+                return - ([ ';' ].index(c) + 1)
+            except ValueError:
+                return 0 # False
 
     EOF_char = '\0'
     def EOF(c):
@@ -484,6 +497,7 @@ class Parser:
         ['xid_start', 'lex.start_token', True, State.TOKEN],
         ['start_expr', ['lex.start_expr', 'ast.start_expr'], True],
         ['end_expr', ['lex.end_expr', 'ast.end_expr'], True],
+        ['sentence_sep', ['lex.end_expr', 'ast.end_expr', 'lex.start_expr', 'ast.start_expr'], True],
         ['quote', 'lex.start_quote', True, State.QUOTED_STRING],
         ['EOF', 'ast.end_of_input', True],
     ]
